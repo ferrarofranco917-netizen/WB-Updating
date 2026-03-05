@@ -39,34 +39,12 @@ class BudgetWise {
         this.showFixedList = localStorage.getItem('budgetwise-show-fixed-list') !== 'false';
         
         // ========== REGOLE CATEGORIE APPRESE ==========
-        // ⚠️ Safe-parse: evita crash se localStorage contiene JSON corrotto
-        let __rawRules = localStorage.getItem('budgetwise-category-rules');
-        let __parsedRules = {};
-        if (__rawRules) {
-            try {
-                __parsedRules = JSON.parse(__rawRules) || {};
-            } catch (e) {
-                console.warn('⚠️ JSON corrotto in budgetwise-category-rules, resetto le regole categorie', e);
-                __parsedRules = {};
-                try { localStorage.removeItem('budgetwise-category-rules'); } catch(_) {}
-            }
-        }
-        this.categoryRules = this.migrateCategoryRules(__parsedRules);
+        this.categoryRules = this.migrateCategoryRules(JSON.parse(localStorage.getItem('budgetwise-category-rules')) || {});
         this.CATEGORY_CONFIDENCE_THRESHOLD = 3;
         
         // ========== CATEGORIE PERSONALIZZATE ==========
         this.defaultCategories = ['Alimentari', 'Trasporti', 'Altro'];
-        let __rawCustomCats = localStorage.getItem('budgetwise-custom-categories');
-        let savedCustom = [];
-        if (__rawCustomCats) {
-            try {
-                savedCustom = JSON.parse(__rawCustomCats) || [];
-            } catch (e) {
-                console.warn('⚠️ JSON corrotto in budgetwise-custom-categories, resetto categorie personalizzate', e);
-                savedCustom = [];
-                try { localStorage.removeItem('budgetwise-custom-categories'); } catch(_) {}
-            }
-        }
+        const savedCustom = JSON.parse(localStorage.getItem('budgetwise-custom-categories')) || [];
         this.customCategories = savedCustom.filter(cat => !this.defaultCategories.includes(cat));
 
         // ========== UI STATE ==========
@@ -79,13 +57,7 @@ class BudgetWise {
         // ========== COLORI PERSONALIZZATI ==========
         const savedColors = localStorage.getItem('budgetwise-custom-colors');
         if (savedColors) {
-            try {
-                this.customColors = JSON.parse(savedColors);
-            } catch (e) {
-                console.warn('⚠️ JSON corrotto in budgetwise-custom-colors, ripristino colori default', e);
-                this.customColors = null;
-                try { localStorage.removeItem('budgetwise-custom-colors'); } catch(_) {}
-            }
+            this.customColors = JSON.parse(savedColors);
         } else {
             this.customColors = null;
         }
@@ -4086,6 +4058,12 @@ formatDaysToYearsMonthsDays(days) {
     }
 
     updateChart() {
+
+        // ✅ Safety: Chart.js could be missing (e.g., vendor 404 / offline). Do not crash the app.
+        if (typeof Chart === 'undefined') {
+            console.warn('⚠️ Chart.js non disponibile: grafico disabilitato');
+            return;
+        }
         const categories = {};
         const categoryExpenses = {};
 
@@ -4702,20 +4680,7 @@ document.documentElement.style.setProperty('--accent-gradient',
 
     resetAll() {
         if (confirm(this.t('confirmReset'))) {
-            // ⚠️ Reset selettivo: cancella SOLO chiavi BudgetWise (evita effetti collaterali su altri progetti nello stesso dominio)
-            try {
-                const prefixes = ['budgetwise-', 'bw-'];
-                for (let i = localStorage.length - 1; i >= 0; i--) {
-                    const k = localStorage.key(i);
-                    if (!k) continue;
-                    if (prefixes.some(p => k.startsWith(p))) {
-                        localStorage.removeItem(k);
-                    }
-                }
-            } catch (e) {
-                console.warn('⚠️ Reset selettivo fallito, fallback a clear()', e);
-                try { localStorage.clear(); } catch(_) {}
-            }
+            localStorage.clear();
             const today = new Date();
             const end = new Date(today);
             end.setDate(today.getDate() + 28);
@@ -6712,7 +6677,7 @@ function setupImportHandlers() {
     const advancedToggle = document.getElementById('importAdvancedToggle');
     const advancedWrap = document.getElementById('importAdvanced');
     
-    if (!btn || !fileInput || !window.app) {
+    if (!btn || !fileInput || !window.app || typeof window.app.t !== 'function') {
         console.error('Elementi import non trovati');
         return;
     }
@@ -7323,7 +7288,7 @@ BudgetWise.prototype.printReport = function() {
 };;
 
 BudgetWise.prototype.loadPdfLib = async function() {
-    // Lazy-load jsPDF only when needed (frontend-only). Local-first, CDN fallback.
+    // Lazy-load jsPDF from CDN only when needed (frontend-only).
     // If the user is offline, we gracefully fallback to Print -> Save as PDF.
     if (window.jspdf && window.jspdf.jsPDF) return true;
 
@@ -7336,9 +7301,8 @@ BudgetWise.prototype.loadPdfLib = async function() {
         document.head.appendChild(s);
     });
 
-    // Local-first, then CDN fallback for resilience.
+    // Prefer a stable CDN. Two attempts for resilience.
     const urls = [
-        './assets/vendor/jspdf.umd.min.js',
         'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
         'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js'
     ];
@@ -7800,6 +7764,59 @@ BudgetWise.prototype.handleUrlAction = function() {
 // ===== Premium modules helpers (SAFE GLOBAL) =====
 window.app = window.app || {};
 
+
+// ✅ PATCH: define missing premium helpers to avoid runtime crashes
+window.app.updateLicenseStatus = window.app.updateLicenseStatus || function () {
+    try {
+        // Prefer real instance if available
+        const inst = (window.BudgetWiseApp && typeof window.BudgetWiseApp === 'object') ? window.BudgetWiseApp : null;
+        const lic = (inst && inst.license) ? inst.license : (window.app && window.app.license ? window.app.license : null);
+
+        let status = 'free';
+        if (lic && typeof lic.getStatus === 'function') {
+            status = lic.getStatus() || 'free';
+        } else if (lic && typeof lic.hasFullPremiumAccess === 'function' && lic.hasFullPremiumAccess()) {
+            status = 'premium';
+        }
+
+        const badgeWrap = document.getElementById('licenseStatus');
+        if (badgeWrap) {
+            badgeWrap.classList.remove('free', 'trial', 'premium');
+            badgeWrap.classList.add(status);
+            const badge = badgeWrap.querySelector('.license-badge');
+            if (badge) {
+                badge.textContent = (status === 'premium') ? 'Premium' : (status === 'trial') ? 'Trial' : 'Free';
+            }
+        }
+
+        const banner = document.getElementById('premiumBanner');
+        if (banner) {
+            banner.style.display = (status === 'free') ? 'block' : 'none';
+        }
+
+        // Sync UI limits with license status
+        if (inst && typeof inst.applyFreeLimitsToUI === 'function') {
+            inst.applyFreeLimitsToUI();
+        }
+    } catch (e) {
+        console.warn('⚠️ updateLicenseStatus error:', e);
+    }
+};
+
+window.app.enablePremiumFeatures = window.app.enablePremiumFeatures || function () {
+    try {
+        const inst = (window.BudgetWiseApp && typeof window.BudgetWiseApp === 'object') ? window.BudgetWiseApp : null;
+        if (inst && typeof inst.applyFreeLimitsToUI === 'function') {
+            inst.applyFreeLimitsToUI();
+        }
+        const banner = document.getElementById('premiumBanner');
+        if (banner) banner.style.display = 'none';
+    } catch (e) {
+        console.warn('⚠️ enablePremiumFeatures error:', e);
+    }
+};
+
+
 // Merge translations into "this" (the BudgetWise app instance)
 window.app.mergeTranslations = function(extra) {
   if (!extra || typeof extra !== 'object') return;
@@ -8036,7 +8053,7 @@ window.app.getPremiumModuleTranslations = function() {
         };
 
         window.app.setupPremiumSystem = () => {
-            window.app.updateLicenseStatus();
+            if (typeof window.app.updateLicenseStatus === 'function') window.app.updateLicenseStatus();
             window.app.setupPremiumEventListeners();
             window.app.showPremiumBannerIfNeeded();
             window.app.premiumSetupDone = true;
