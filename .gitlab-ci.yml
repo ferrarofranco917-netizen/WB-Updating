@@ -1,0 +1,12 @@
+pages:
+  stage: deploy
+  script:
+    - rm -rf public
+    - mkdir -p public
+    - shopt -s dotglob
+    - for f in * .*; do [ "$f" = "." ] || [ "$f" = ".." ] || [ "$f" = "public" ] || [ "$f" = ".git" ] || [ "$f" = ".gitlab-ci.yml" ] || cp -R "$f" public/; done
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
