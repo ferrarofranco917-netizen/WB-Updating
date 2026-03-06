@@ -6374,25 +6374,119 @@ function setupImportHandlers() {
     const excelHeaderSelect = document.getElementById('excelHeaderRow');
     const advancedToggle = document.getElementById('importAdvancedToggle');
     const advancedWrap = document.getElementById('importAdvanced');
+    const chooseLabel = document.getElementById('csvChooseFileLabel');
 
     if (!btn || !fileInput || !window.app || typeof window.app.t !== 'function') {
         console.error('Elementi import non trovati');
         return;
     }
 
-    if (fileInput.dataset.bound === '1' && btn.dataset.bound === '1') {
-        return;
-    }
+    window._importState = window._importState || {
+        selectedFile: null,
+        selectedFileName: '',
+        pendingExcelFile: null,
+        autoImportAfterPick: false,
+        isImporting: false,
+    };
 
-    window._pendingExcelFile = null;
-    window._pendingImportFile = null;
-    window._pendingImportName = '';
+    const state = window._importState;
+
+    const resetUi = () => {
+        fileInput.value = '';
+        state.selectedFile = null;
+        state.selectedFileName = '';
+        state.pendingExcelFile = null;
+        state.autoImportAfterPick = false;
+        if (fileNameSpan) {
+            fileNameSpan.textContent = window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato';
+        }
+        if (sheetSelect) {
+            sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
+            sheetSelect.disabled = true;
+        }
+    };
+
+    const setSelectedFile = (file) => {
+        state.selectedFile = file || null;
+        state.selectedFileName = file?.name || '';
+        if (fileNameSpan) {
+            fileNameSpan.textContent = file?.name || (window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato');
+        }
+    };
+
+    const preloadExcelSheets = async (file) => {
+        if (!file || !sheetSelect) return;
+        sheetSelect.innerHTML = '<option value="">Caricamento...</option>';
+        sheetSelect.disabled = true;
+
+        const arrayBuffer = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve(ev.target.result);
+            reader.onerror = () => reject(new Error('Errore nella lettura del file Excel'));
+            reader.readAsArrayBuffer(file);
+        });
+
+        const data = new Uint8Array(arrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        sheetSelect.innerHTML = workbook.SheetNames.map((name, index) =>
+            `<option value="${index}">${index + 1}. ${name}</option>`
+        ).join('');
+        sheetSelect.disabled = false;
+        sheetSelect.value = '0';
+        state.pendingExcelFile = file;
+    };
+
+    const doImport = async () => {
+        if (state.isImporting) return;
+
+        const selectedFile = (fileInput.files && fileInput.files[0]) || state.selectedFile || state.pendingExcelFile;
+        if (!selectedFile) {
+            resetUi();
+            alert(window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato');
+            return;
+        }
+
+        const fileExt = selectedFile.name.split('.').pop().toLowerCase();
+        const isExcel = ['xls', 'xlsx'].includes(fileExt);
+
+        try {
+            state.isImporting = true;
+            btn.disabled = true;
+            btn.textContent = '⏳ Importazione...';
+
+            if (isExcel) {
+                const sheetIndex = (sheetSelect && !sheetSelect.disabled && sheetSelect.value !== '')
+                    ? parseInt(sheetSelect.value, 10)
+                    : 0;
+                const headerRow = excelHeaderSelect
+                    ? parseInt(excelHeaderSelect.value || '-1', 10)
+                    : -1;
+                await window.app.parseExcel(selectedFile, sheetIndex, headerRow);
+            } else {
+                const delimiter = document.getElementById('csvSeparator')?.value || ';';
+                const dateFormat = document.getElementById('csvDelimiter')?.value || 'DD/MM/YYYY';
+                const skipRows = parseInt(skipRowsInput?.value || '0', 10);
+                const headerRow = parseInt(headerRowInput?.value || '1', 10);
+                await window.app.parseCSV(selectedFile, delimiter, dateFormat, skipRows, headerRow);
+            }
+
+            resetUi();
+        } catch (error) {
+            console.error(error);
+            alert('❌ Errore durante l\'import: ' + (error?.message || String(error)));
+        } finally {
+            state.isImporting = false;
+            state.autoImportAfterPick = false;
+            btn.disabled = false;
+            btn.innerHTML = window.app?.t ? window.app.t('csvImportBtn') : '📥 Importa CSV / Excel';
+        }
+    };
 
     if (advancedToggle && advancedWrap && advancedToggle.dataset.bound !== '1') {
         advancedToggle.dataset.bound = '1';
         advancedToggle.textContent = window.app ? window.app.t('advancedOptions') : '⚙️ Opzioni avanzate';
-
-        advancedToggle.addEventListener('click', () => {
+        advancedToggle.addEventListener('click', (e) => {
+            e.preventDefault();
             const isOpen = advancedWrap.style.display !== 'none';
             advancedWrap.style.display = isOpen ? 'none' : 'block';
             advancedToggle.textContent = isOpen
@@ -6401,132 +6495,65 @@ function setupImportHandlers() {
         });
     }
 
+    if (chooseLabel && chooseLabel.dataset.bound !== '1') {
+        chooseLabel.dataset.bound = '1';
+        chooseLabel.addEventListener('click', (e) => {
+            e.preventDefault();
+            fileInput.click();
+        });
+    }
+
     if (fileInput.dataset.bound !== '1') {
         fileInput.dataset.bound = '1';
-
-        fileInput.addEventListener('change', function (e) {
+        fileInput.addEventListener('change', async function (e) {
             const file = e.target.files && e.target.files[0];
             if (!file) {
-                fileNameSpan.textContent = window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato';
-                window._pendingExcelFile = null;
-                window._pendingImportFile = null;
-                window._pendingImportName = '';
-                if (sheetSelect) {
-                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
-                    sheetSelect.disabled = true;
-                }
+                resetUi();
                 return;
             }
 
-            window._pendingImportFile = file;
-            window._pendingImportName = file.name || '';
-            fileNameSpan.textContent = file.name;
-
+            setSelectedFile(file);
             const fileExt = file.name.split('.').pop().toLowerCase();
             const isExcel = ['xls', 'xlsx'].includes(fileExt);
 
-            if (!isExcel) {
-                window._pendingExcelFile = null;
-                if (sheetSelect) {
-                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
-                    sheetSelect.disabled = true;
-                }
-                return;
-            }
-
-            if (sheetSelect) {
-                sheetSelect.innerHTML = '<option value="">Caricamento...</option>';
-                sheetSelect.disabled = true;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                try {
-                    const data = new Uint8Array(ev.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-
+            try {
+                if (isExcel) {
+                    await preloadExcelSheets(file);
+                } else {
+                    state.pendingExcelFile = null;
                     if (sheetSelect) {
-                        sheetSelect.innerHTML = workbook.SheetNames.map((name, index) =>
-                            `<option value="${index}">${index + 1}. ${name}</option>`
-                        ).join('');
-                        sheetSelect.disabled = false;
-                        sheetSelect.value = '0';
+                        sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
+                        sheetSelect.disabled = true;
                     }
-
-                    window._pendingExcelFile = file;
-                } catch (err) {
-                    console.error(err);
-                    alert('❌ Errore nella lettura del file Excel: ' + err.message);
-                    window._pendingExcelFile = null;
                 }
-            };
-            reader.onerror = () => {
-                alert('❌ Errore nella lettura del file Excel');
-                window._pendingExcelFile = null;
-            };
-            reader.readAsArrayBuffer(file);
+
+                if (state.autoImportAfterPick) {
+                    setTimeout(() => { doImport(); }, 0);
+                }
+            } catch (err) {
+                console.error(err);
+                alert('❌ Errore nella lettura del file Excel: ' + err.message);
+            }
         });
     }
 
     if (btn.dataset.bound !== '1') {
         btn.dataset.bound = '1';
+        btn.addEventListener('click', async function (e) {
+            e.preventDefault();
+            e.stopPropagation();
 
-        btn.addEventListener('click', async function () {
-            const selectedFile = (fileInput.files && fileInput.files[0]) || window._pendingImportFile;
-
+            const selectedFile = (fileInput.files && fileInput.files[0]) || state.selectedFile || state.pendingExcelFile;
             if (!selectedFile) {
+                state.autoImportAfterPick = true;
                 fileInput.click();
                 return;
             }
 
-            const fileExt = selectedFile.name.split('.').pop().toLowerCase();
-            const isExcel = ['xls', 'xlsx'].includes(fileExt);
-
-            try {
-                btn.disabled = true;
-                btn.textContent = '⏳ Importazione...';
-
-                if (isExcel) {
-                    const sheetIndex = (sheetSelect && !sheetSelect.disabled && sheetSelect.value !== '')
-                        ? parseInt(sheetSelect.value, 10)
-                        : 0;
-
-                    const headerRow = excelHeaderSelect
-                        ? parseInt(excelHeaderSelect.value || '-1', 10)
-                        : -1;
-
-                    await window.app.parseExcel(selectedFile, sheetIndex, headerRow);
-                } else {
-                    const delimiter = document.getElementById('csvSeparator')?.value || ';';
-                    const dateFormat = document.getElementById('csvDelimiter')?.value || 'dd/mm/yyyy';
-                    const skipRows = parseInt(skipRowsInput?.value || '0', 10);
-                    const headerRow = parseInt(headerRowInput?.value || '1', 10);
-
-                    await window.app.parseCSV(selectedFile, delimiter, dateFormat, skipRows, headerRow);
-                }
-
-                fileInput.value = '';
-                fileNameSpan.textContent = window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato';
-                window._pendingExcelFile = null;
-                window._pendingImportFile = null;
-                window._pendingImportName = '';
-
-                if (sheetSelect) {
-                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
-                    sheetSelect.disabled = true;
-                }
-            } catch (error) {
-                console.error(error);
-                alert('❌ Errore durante l\'import: ' + (error?.message || String(error)));
-            } finally {
-                btn.innerHTML = window.app?.t ? window.app.t('csvImportBtn') : '📥 Importa CSV / Excel';
-                btn.disabled = false;
-            }
+            await doImport();
         });
     }
 }
-
-
 
 BudgetWise.prototype.clamp100 = function(x) {
   return Math.max(0, Math.min(100, x));
