@@ -329,12 +329,7 @@ class BudgetWise {
                 currentPlan: '📅 Piano attuale',
                 currentPlanMessage: 'Con questi parametri non raggiungerai l\'obiettivo',
                 endPeriod: 'Fine periodo',
-                                wisescoreTitle: "WiseScore™",
-                wisescoreTimeline: "Andamento WiseScore",
-                pillarStability: "Stabilità",
-                pillarDiscipline: "Disciplina",
-                pillarResilience: "Resilienza",
-upgradeBanner: '🚀 Upgrade a Premium',
+                upgradeBanner: '🚀 Upgrade a Premium',
                 upgradeBannerText: 'Sblocca funzionalità illimitate e l\'assistente AI!',
                 upgrade: 'Upgrade',
                 free: '🆓 Free',
@@ -389,12 +384,7 @@ upgradeBanner: '🚀 Upgrade a Premium',
                 perMonth: '/month',
                 onboardingDemo: "✨ Load demo",
                 loadDemo: "Load demo",
-                                wisescoreTitle: "WiseScore™",
-                wisescoreTimeline: "WiseScore trend",
-                pillarStability: "Stability",
-                pillarDiscipline: "Discipline",
-                pillarResilience: "Resilience",
-upgradeBanner: '🚀 Upgrade to Premium',
+                upgradeBanner: '🚀 Upgrade to Premium',
                 upgradeBannerText: 'Unlock unlimited features and AI assistant!',
                 upgrade: 'Upgrade',
                 free: '🆓 Free',
@@ -702,12 +692,7 @@ upgradeBanner: '🚀 Upgrade to Premium',
                 suggestionAppliedToast: "💡 Sugerencia aplicada: {percent}% de ahorro",
                 onboardingDemo: "✨ Cargar demo",
                 loadDemo: "Cargar demo",
-                                wisescoreTitle: "WiseScore™",
-                wisescoreTimeline: "Evolución WiseScore",
-                pillarStability: "Estabilidad",
-                pillarDiscipline: "Disciplina",
-                pillarResilience: "Resiliencia",
-upgradeBanner: '🚀 Mejora a Premium',
+                upgradeBanner: '🚀 Mejora a Premium',
                 upgradeBannerText: '¡Desbloquea funciones ilimitadas y el asistente IA!',
                 upgrade: 'Mejorar',
                 free: '🆓 Gratis',
@@ -995,12 +980,7 @@ upgradeBanner: '🚀 Mejora a Premium',
                 suggestionAppliedToast: "💡 Suggestion appliquée : {percent}% d'épargne",
                 onboardingDemo: "✨ Charger la démo",
                 loadDemo: "Cargar demo",
-                                wisescoreTitle: "WiseScore™",
-                wisescoreTimeline: "Évolution WiseScore",
-                pillarStability: "Stabilité",
-                pillarDiscipline: "Discipline",
-                pillarResilience: "Résilience",
-upgradeBanner: '🚀 Passez à Premium',
+                upgradeBanner: '🚀 Passez à Premium',
                 upgradeBannerText: 'Débloquez des fonctionnalités illimitées et l\'assistant IA !',
                 upgrade: 'Passer à Premium',
                 free: '🆓 Gratuit',
@@ -1585,11 +1565,28 @@ upgradeBanner: '🚀 Passez à Premium',
         // Otherwise we would "freeze" light colors as inline CSS variables and dark mode would barely change.
         if (localStorage.getItem('budgetwise-custom-colors')) {
             this.applyCustomColors();
-        } else {
+        
+
+// ===== Report View (safe) =====
+const openReportBtn = document.getElementById('openReport');
+if (openReportBtn) openReportBtn.addEventListener('click', () => this.openReport());
+
+const closeReportBtn = document.getElementById('closeReport');
+if (closeReportBtn) closeReportBtn.addEventListener('click', () => this.closeReport());
+
+const printReportBtn = document.getElementById('printReport');
+if (printReportBtn) printReportBtn.addEventListener('click', () => window.print());
+
+const downloadPdfBtn = document.getElementById('downloadReportPdf');
+if (downloadPdfBtn) downloadPdfBtn.addEventListener('click', () => this.downloadReportPdf?.());
+
+const overlay = document.getElementById('reportOverlay');
+if (overlay) overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) this.closeReport();
+});
+} else {
             this.clearThemeInlineOverrides();
         }
-        // ===== Report View (safe) =====
-        this.initReportBindings();
         this.setupColorPickers();
         this.updateUI();
         this.updateChart();
@@ -3362,60 +3359,6 @@ const min = Math.min(...data, 0);
             ctx.fill();
         });
     }
-
-    initReportBindings() {
-        if (this._reportBindingsDone) return;
-        this._reportBindingsDone = true;
-
-        const bind = () => {
-            // Delegation: robust even if elements are re-rendered
-            document.addEventListener('click', (e) => {
-                const open = e.target.closest('#openReport');
-                if (open) {
-                    e.preventDefault();
-                    this.openReport?.();
-                    return;
-                }
-
-                const close = e.target.closest('#closeReport');
-                if (close) {
-                    e.preventDefault();
-                    this.closeReport?.();
-                    return;
-                }
-
-                const printBtn = e.target.closest('#printReport');
-                if (printBtn) {
-                    e.preventDefault();
-                    window.print();
-                    return;
-                }
-
-                const dl = e.target.closest('#downloadReportPdf');
-                if (dl) {
-                    e.preventDefault();
-                    this.downloadReportPdf?.();
-                    return;
-                }
-            }, { passive: false });
-
-            const overlay = document.getElementById('reportOverlay');
-            if (overlay && !overlay._bwBound) {
-                overlay._bwBound = true;
-                overlay.addEventListener('click', (e) => {
-                    if (e.target === overlay) this.closeReport?.();
-                });
-            }
-        };
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', bind, { once: true });
-        } else {
-            bind();
-        }
-    }
-
-
 
     setupEventListeners() {
         document.getElementById('themeToggle').addEventListener('click', () => this.toggleTheme());
@@ -6672,9 +6615,6 @@ BudgetWise.prototype.openReport = function() {
     const overlay = document.getElementById('reportOverlay');
     const content = document.getElementById('reportContent');
     if (!overlay || !content) return;
-    // a11y: preserve focus
-    this._bwLastFocus = document.activeElement;
-    overlay.setAttribute('aria-hidden', 'false');
 
     content.innerHTML = this.buildReportHtml();
     overlay.style.display = '';
@@ -6687,17 +6627,8 @@ BudgetWise.prototype.openReport = function() {
 BudgetWise.prototype.closeReport = function() {
     const overlay = document.getElementById('reportOverlay');
     if (!overlay) return;
-    // a11y: if focus is inside the overlay, move it out before aria-hidden
-    const active = document.activeElement;
-    if (active && overlay.contains(active)) {
-        try { active.blur(); } catch (_) {}
-    }
     overlay.style.display = 'none';
     overlay.setAttribute('aria-hidden', 'true');
-    // restore focus
-    if (this._bwLastFocus && typeof this._bwLastFocus.focus === 'function') {
-        try { this._bwLastFocus.focus(); } catch (_) {}
-    }
 }
 
 BudgetWise.prototype.loadPdfLib = async function() {
