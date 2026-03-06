@@ -5241,9 +5241,7 @@ const autoCompleteIdentical = (startIndex, newCategory, description) => {
 }
     // ========== IMPORT CSV CON MAPPATURA E REVISIONE ==========
     async parseCSV(file, delimiter, dateFormat, skipRows = 0, headerRow = 1) {
-        // Verifica limite import
-        if (!this.checkFreeLimits('csvImport')) return { cancelled: true, added: 0, incomes: 0 };
-        
+        if (typeof this.checkFreeLimits === 'function' && !this.checkFreeLimits('csvImport')) return { cancelled: true, added: 0, incomes: 0 };
         console.log('📥 Inizio import CSV:', file.name, 'delimiter:', delimiter, 'dateFormat:', dateFormat, 'skipRows:', skipRows, 'headerRow:', headerRow);
 
         const mapping = await this.showMappingDialog(file, delimiter, skipRows, headerRow);
@@ -5311,15 +5309,10 @@ const autoCompleteIdentical = (startIndex, newCategory, description) => {
 
                         let _suggested = null;
                         if (!category) {
-                            // Suggerimento categorie (solo premium o base)
-                            if (!this.license?.isFeatureLocked?.('categoryLearning')) {
-                                const sug = this.suggestCategory(description);
-                                category = sug.confidence >= this.CATEGORY_CONFIDENCE_THRESHOLD ? sug.category : 'Altro';
-                                if (sug.confidence > 0 && sug.confidence < this.CATEGORY_CONFIDENCE_THRESHOLD) {
-                                    _suggested = sug.category;
-                                }
-                            } else {
-                                category = 'Altro';
+                            const sug = this.suggestCategory(description);
+                            category = sug.confidence >= this.CATEGORY_CONFIDENCE_THRESHOLD ? sug.category : 'Altro';
+                            if (sug.confidence > 0 && sug.confidence < this.CATEGORY_CONFIDENCE_THRESHOLD) {
+                                _suggested = sug.category;
                             }
                         }
 
@@ -5360,14 +5353,15 @@ const autoCompleteIdentical = (startIndex, newCategory, description) => {
 
                             if (tempIncomes.length > 0) {
                                 if (!this.data.incomes) this.data.incomes = [];
-                               this.data.incomes.push(...tempIncomes);
+                                this.data.incomes.push(...tempIncomes);
                                 addedIncomes = tempIncomes.length;
                             }
 
                             this.saveData();
                             this.updateUI();
                             this.updateChart();
-                            this.updateTransactionCount();
+                        if (typeof this.updateTransactionCount === 'function') this.updateTransactionCount();
+                            if (typeof this.updateTransactionCount === 'function') this.updateTransactionCount();
 
                             const mostRecent = reviewed
                                 .map(e => this.normalizeIsoDate(e.date))
@@ -5398,7 +5392,6 @@ const autoCompleteIdentical = (startIndex, newCategory, description) => {
                         this.saveData();
                         this.updateUI();
                         this.updateChart();
-                        this.updateTransactionCount();
 
                         this.showToast(
                             this.data.language === 'it'
@@ -5437,176 +5430,25 @@ const autoCompleteIdentical = (startIndex, newCategory, description) => {
     }
 // ========== MAPPATURA CAMPI CSV ==========
 async showMappingDialog(file, delimiter, skipRows = 0, headerRow = 1) {
-    return new Promise(async (resolve) => {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('csvMappingOverlay');
+        const headersRow = document.getElementById('csvMappingHeaders');
+        const previewBody = document.getElementById('csvMappingPreview');
+        const fieldsDiv = document.getElementById('csvMappingFields');
         
-// Ensure mapping DOM exists (some builds may miss it in index.html)
-const ensureMappingDom = () => {
-    let overlayEl = document.getElementById('csvMappingOverlay');
-    if (overlayEl) return;
-
-    overlayEl = document.createElement('div');
-    overlayEl.id = 'csvMappingOverlay';
-    overlayEl.style.cssText = [
-        'position:fixed','inset:0','display:none','align-items:center','justify-content:center',
-        'background:rgba(0,0,0,0.65)','z-index:99999'
-    ].join(';');
-
-    const box = document.createElement('div');
-    box.style.cssText = [
-        'width:min(920px,95vw)','max-height:85vh','overflow:auto',
-        'background:#1f232a','border:1px solid rgba(255,255,255,0.08)',
-        'border-radius:14px','padding:16px','color:#fff','box-shadow:0 10px 30px rgba(0,0,0,0.35)'
-    ].join(';');
-
-    const title = document.createElement('div');
-    title.innerHTML = '<h3 style="margin:0 0 10px 0;font-size:18px">Mappatura colonne</h3>' +
-                      '<div style="opacity:.75;font-size:13px;margin-bottom:10px">Seleziona le colonne corrette e conferma.</div>';
-    box.appendChild(title);
-
-    const table = document.createElement('table');
-    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px';
-    const thead = document.createElement('thead');
-    const hr = document.createElement('tr');
-    hr.id = 'csvMappingHeaders';
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    tbody.id = 'csvMappingPreview';
-    table.appendChild(tbody);
-    box.appendChild(table);
-
-    const fields = document.createElement('div');
-    fields.id = 'csvMappingFields';
-    fields.style.cssText = 'margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px';
-    box.appendChild(fields);
-
-    const actions = document.createElement('div');
-    actions.style.cssText = 'margin-top:14px;display:flex;gap:10px;justify-content:flex-end';
-    const cancel = document.createElement('button');
-    cancel.id = 'csvMappingCancel';
-    cancel.textContent = 'Annulla';
-    cancel.style.cssText = 'padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:#fff;cursor:pointer';
-    const ok = document.createElement('button');
-    ok.id = 'csvMappingConfirm';
-    ok.textContent = 'Conferma';
-    ok.style.cssText = 'padding:10px 14px;border-radius:10px;border:0;background:#2d8cff;color:#fff;cursor:pointer';
-    actions.appendChild(cancel);
-    actions.appendChild(ok);
-    box.appendChild(actions);
-
-    overlayEl.appendChild(box);
-    document.body.appendChild(overlayEl);
-};
-
-ensureMappingDom();
-
-let overlay = document.getElementById('csvMappingOverlay');
-let headersRow = document.getElementById('csvMappingHeaders');
-let previewBody = document.getElementById('csvMappingPreview');
-let fieldsDiv = document.getElementById('csvMappingFields');
-let confirmBtn = document.getElementById('csvMappingConfirm');
-let cancelBtn = document.getElementById('csvMappingCancel');
-
-        // ✅ Safety: risolvi SEMPRE la Promise (evita “Importazione…” infinito)
-        let resolved = false;
-        let onKeyDown = null;
-        let onOverlayClick = null;
-
-        const cleanup = () => {
-            try { if (typeof onKeyDown === 'function') document.removeEventListener('keydown', onKeyDown); } catch {}
-            try { if (overlay && typeof onOverlayClick === 'function') overlay.removeEventListener('click', onOverlayClick); } catch {}
-        };
-
-        const safeResolve = (v) => {
-            if (resolved) return;
-            resolved = true;
-            try { clearTimeout(_mappingTimeout); } catch {}
-            cleanup();
-            resolve(v);
-        };
-
-        // Watchdog: evita “Importazione…” infinito anche in caso di DOM/JS strani
-        const _mappingTimeout = setTimeout(() => {
-            console.warn('⚠️ Mapping dialog timeout: chiusura automatica e uso auto-mapping.');
-            try { overlay && (overlay.style.display = 'none'); } catch {}
-            safeResolve(null);
-        }, 12000);
-
-        if (!overlay || !headersRow || !previewBody || !fieldsDiv || !confirmBtn || !cancelBtn) {
-            console.warn('⚠️ Elementi mapping CSV non trovati: uso auto-mapping.');
-            try { overlay && (overlay.style.display = 'none'); } catch {}
-            safeResolve(null);
+        if (!overlay || !headersRow || !previewBody || !fieldsDiv) {
+            console.error('Elementi mappatura non trovati');
+            resolve(null);
             return;
         }
-
-        // Chiudi con ESC
-        onKeyDown = (e) => {
-            if (e.key === 'Escape') {
-                try { overlay.style.display = 'none'; } catch {}
-                safeResolve(null);
-            }
-        };
-
-        // Chiudi cliccando sul “fondo” overlay (non sul contenuto)
-        onOverlayClick = (e) => {
-            if (e.target === overlay) {
-                try { overlay.style.display = 'none'; } catch {}
-                safeResolve(null);
-            }
-        };
-
-        document.addEventListener('keydown', onKeyDown);
-        overlay.addEventListener('click', onOverlayClick);
-
-        const readTextWithTimeout = (f, ms = 20000) => new Promise(async (res, rej) => {
-            let done = false;
-
-            const timer = setTimeout(() => {
-                if (done) return;
-                done = true;
-                rej(new Error('Timeout lettura file'));
-            }, ms);
-
-            const finishOk = (txt) => {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                res(txt);
-            };
-
-            const finishErr = (err) => {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                rej(err);
-            };
-
-            try {
-                // API moderna (più affidabile anche per File/Blob “virtuali”)
-                if (f && typeof f.text === 'function') {
-                    const txt = await f.text();
-                    finishOk(txt ?? '');
-                    return;
-                }
-
-                // Fallback FileReader
-                const reader = new FileReader();
-                reader.onload = (e) => finishOk(e?.target?.result ?? '');
-                reader.onerror = () => finishErr(new Error('FileReader error'));
-                reader.readAsText(f);
-            } catch (err) {
-                finishErr(err);
-            }
-        });
-
-        try {
-            const textRaw = await readTextWithTimeout(file, 20000);
-
-            const text = textRaw;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const text = e.target.result;
             const lines = text.split('\n').filter(line => line.trim() !== '');
             
             if (lines.length === 0) {
-                safeResolve(null);
+                resolve(null);
                 return;
             }
             
@@ -5699,12 +5541,12 @@ let cancelBtn = document.getElementById('csvMappingCancel');
                 }
                 
                 overlay.style.display = 'none';
-                safeResolve(mapping);
+                resolve(mapping);
             };
             
             const onCancel = () => {
                 overlay.style.display = 'none';
-                safeResolve(null);
+                resolve(null);
             };
             
             // Clona per evitare listener duplicati
@@ -5715,20 +5557,18 @@ let cancelBtn = document.getElementById('csvMappingCancel');
             
             newConfirm.addEventListener('click', onConfirm);
             newCancel.addEventListener('click', onCancel);
+        };
         
-        } catch (err) {
-            console.error('❌ showMappingDialog: errore lettura file:', err);
-            alert('❌ Impossibile leggere il file per la mappatura. Riprova o usa CSV.');
-            try { overlay.style.display = 'none'; } catch {}
-            safeResolve(null);
-        }
+        reader.onerror = () => {
+            resolve(null);
+        };
+        
+        reader.readAsText(file);
     });
 }
     // ========== IMPORT EXCEL CON AUTO-RICONOSCIMENTO INTELLIGENTE ==========
 async parseExcel(file, sheetIndex = 0, headerRow = -1) {
-        // Verifica limite import
-        if (!this.checkFreeLimits('csvImport')) return { cancelled: true, added: 0, incomes: 0 };
-        
+        if (typeof this.checkFreeLimits === 'function' && !this.checkFreeLimits('csvImport')) return { cancelled: true, added: 0, incomes: 0 };
         const self = this; // 
     console.log('📥 Inizio import Excel con auto-riconoscimento:', file.name, 'foglio:', sheetIndex);
 
@@ -5900,68 +5740,12 @@ const allLines = relevantRows.map((row, rowIndex) =>
     );
 
     // Mostra il dialogo di mappatura (l'utente può ancora correggere se necessario)
-    let mapping = await this.showMappingDialog(virtualFile, '	', 0, 1);
-    // Se il dialog non è disponibile (DOM mancante/chiuso/timeout), proseguiamo con auto-mapping
+    const mapping = await self.showMappingDialog(virtualFile, '\t', 0, 1); 
     if (!mapping) {
-        // Costruisci un mapping automatico sicuro
-        const auto = { dateCol: -1, descCol: -1, amountCol: -1, categoryCol: -1 };
-        try {
-            const dateColsAuto = Array.isArray(dateColumnIndices) ? dateColumnIndices : [];
-            const amtColsAuto = Array.isArray(amountColumnIndices) ? amountColumnIndices : [];
-            auto.dateCol = dateColsAuto.length ? dateColsAuto[0] : 0;
-
-            // Descrizione: preferisci colonne con "descr/causal/details/memo"
-            if (Array.isArray(headers) && headers.length) {
-                const hNorm = headers.map(h => String(h || '').toLowerCase());
-                const descIdx = hNorm.findIndex(h => h.includes('descr') || h.includes('causal') || h.includes('details') || h.includes('memo') || h.includes('description') || h.includes('payee'));
-                if (descIdx >= 0) auto.descCol = descIdx;
-            }
-            if (auto.descCol === -1) {
-                // fallback: prima colonna non data/non importo
-                const forbidden = new Set([auto.dateCol, ...dateColsAuto, ...amtColsAuto]);
-                for (let i = 0; i < (headers?.length || 0); i++) {
-                    if (!forbidden.has(i)) { auto.descCol = i; break; }
-                }
-                if (auto.descCol === -1) auto.descCol = auto.dateCol;
-            }
-
-            if (amtColsAuto.length >= 2) {
-                // Modalità dual: Entrate/Uscite separate
-                auto._incomeCol = amtColsAuto[0];
-                auto._expenseCol = amtColsAuto[1];
-                auto.amountCol = -2;
-            } else {
-                auto.amountCol = amtColsAuto.length ? amtColsAuto[0] : -1;
-            }
-        } catch (e) {
-            console.warn('⚠️ Auto-mapping Excel fallback: errore costruzione mapping', e);
-        }
-
-        console.warn('✅ Import Excel: mapping automatico applicato (dialog non disponibile).', auto);
-        mapping = auto;
+        alert(this.t('importCancelled'));
+        return { cancelled: true, added: 0, incomes: 0 };
     }
 
-
-// Supporto estratti con colonne separate Entrate/Uscite (es. Entrate=2, Uscite=3)
-// Se il file ha entrambe e l'utente ha scelto una sola colonna importo, abilito modalità dual per importare anche le uscite.
-try {
-    if (Array.isArray(amountCols) && amountCols.length >= 2) {
-        mapping._incomeCol = amountCols[0];
-        mapping._expenseCol = amountCols[1];
-        // Flag interno: in fase di parsing useremo _incomeCol/_expenseCol
-        mapping.amountCol = -2;
-    }
-} catch {}
-
-// Se la descrizione è mappata su una colonna data per errore, prova a usare "Descrizione" se presente
-try {
-    if (Array.isArray(headers) && headers.length) {
-        const lower = headers.map(h => String(h || '').toLowerCase());
-        const descIdx = lower.findIndex(h => h.includes('descr') || h.includes('causal') || h.includes('details') || h.includes('memo'));
-        const isDateLike = (i) => Array.isArray(dateCols) && dateCols.includes(i);
-        if ((mapping.descCol === -1 || isDateLike(mapping.descCol)) && descIdx >= 0) mapping.descCol = descIdx;
-    }
-} catch {}
     // --- Processa i dati ---
     const lines = allLines.split('\n').filter(line => line.trim() !== '');
     if (lines.length === 0) {
@@ -5987,65 +5771,20 @@ try {
 
         if (!dateStr || !description || !amountStr) continue;
 
-        // Pulisci e parse importo (robusto, supporta anche colonne Entrate/Uscite separate)
-const parseMoneyLocal = (s) => {
-    if (s === null || s === undefined) return NaN;
-    let t = String(s).trim();
-    if (!t) return NaN;
-    t = t.replace(/\s/g, '');
-    if (t.includes('.') && t.includes(',')) {
-        t = t.replace(/\./g, '').replace(/,/g, '.');
-    } else {
-        t = t.replace(/,/g, '.');
-    }
-    t = t.replace(/[^0-9.-]/g, '');
-    if (!t) return NaN;
-    const v = parseFloat(t);
-    return Number.isFinite(v) ? v : NaN;
-};
+        // Pulisci l'importo
+        amountStr = amountStr.replace(/,/g, '.').replace(/[^0-9.-]/g, '');
+        if (!amountStr) continue;
+        
+        let amount = parseFloat(amountStr);
+        if (isNaN(amount)) continue;
 
-let amount = NaN;
-
-// Modalità dual: mapping._incomeCol/_expenseCol (Entrate/Uscite) se presente
-if (mapping && typeof mapping._incomeCol === 'number' && typeof mapping._expenseCol === 'number'
-    && (mapping._incomeCol >= 0 || mapping._expenseCol >= 0)) {
-
-    const incRaw = (mapping._incomeCol >= 0) ? parts[mapping._incomeCol] : '';
-    const expRaw = (mapping._expenseCol >= 0) ? parts[mapping._expenseCol] : '';
-
-    const incVal = parseMoneyLocal(incRaw);
-    const expVal = parseMoneyLocal(expRaw);
-
-    if (Number.isFinite(incVal) && incVal !== 0) amount = incVal;
-    else if (Number.isFinite(expVal) && expVal !== 0) amount = -Math.abs(expVal);
-
-} else {
-    // Modalità singola colonna importo
-    amountStr = amountStr.replace(/\s/g, '');
-    if (amountStr.includes('.') && amountStr.includes(',')) {
-        amountStr = amountStr.replace(/\./g, '').replace(/,/g, '.');
-    } else {
-        amountStr = amountStr.replace(/,/g, '.');
-    }
-    amountStr = amountStr.replace(/[^0-9.-]/g, '');
-    if (!amountStr) continue;
-
-    amount = parseFloat(amountStr);
-}
-
-if (!Number.isFinite(amount)) continue;
-
-        // Suggerisci categoria se mancante (solo premium)
+        // Suggerisci categoria se mancante
         let _suggested = null;
         if (!category) {
-            if (!this.license?.isFeatureLocked?.('categoryLearning')) {
-                const sug = this.suggestCategory(description);
-                category = sug.confidence >= this.CATEGORY_CONFIDENCE_THRESHOLD ? sug.category : 'Altro';
-                if (sug.confidence > 0 && sug.confidence < this.CATEGORY_CONFIDENCE_THRESHOLD) {
-                    _suggested = sug.category;
-                }
-            } else {
-                category = 'Altro';
+            const sug = this.suggestCategory(description);
+            category = sug.confidence >= this.CATEGORY_CONFIDENCE_THRESHOLD ? sug.category : 'Altro';
+            if (sug.confidence > 0 && sug.confidence < this.CATEGORY_CONFIDENCE_THRESHOLD) {
+                _suggested = sug.category;
             }
         }
 
@@ -6125,7 +5864,9 @@ if (tempIncomes.length > 0) {
 
 this.updateUI();
 this.updateChart();
-this.updateTransactionCount();
+
+    this.updateUI();
+    this.updateChart();
 
     if (addedExpenses > 0) {
         const mostRecent = importedExpenses
@@ -6318,30 +6059,6 @@ this.updateTransactionCount();
     }
 
     setupVoice() {
-        // Blocca in free
-        if (!this.checkFreeLimits('voiceRecognition')) {
-            const micFixed = document.getElementById('micFixedBtn');
-            const voiceBtn = document.getElementById('voiceBtn');
-            const chatVoice = document.getElementById('chatVoiceBtn');
-            
-            if (micFixed) {
-                micFixed.disabled = true;
-                micFixed.title = '🔒 Funzione Premium';
-                micFixed.style.opacity = '0.5';
-            }
-            if (voiceBtn) {
-                voiceBtn.disabled = true;
-                voiceBtn.title = '🔒 Funzione Premium';
-                voiceBtn.style.opacity = '0.5';
-            }
-            if (chatVoice) {
-                chatVoice.disabled = true;
-                chatVoice.title = '🔒 Funzione Premium';
-                chatVoice.style.opacity = '0.5';
-            }
-            return;
-        }
-        
         console.log('Setup voice...');
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
             console.warn('Riconoscimento vocale non supportato');
@@ -6463,78 +6180,74 @@ this.updateTransactionCount();
     }
 
     // ========== AI WIDGET ==========
-generateAiSuggestion() {
-    const suggestions = [];
-    const language = this.data.language;
-    
-    const categoryTotals = {};
-    if (this.data.variableExpenses && typeof this.data.variableExpenses === 'object') {
-        Object.values(this.data.variableExpenses).forEach(day => {
-            if (Array.isArray(day)) {
-                day.forEach(exp => {
-                    const cat = exp.category || 'Altro';
-                    categoryTotals[cat] = (categoryTotals[cat] || 0) + (exp.amount || 0);
-                });
-            }
-        });
-    }
+    generateAiSuggestion() {
+        const suggestions = [];
+        const language = this.data.language;
+        
+        const categoryTotals = {};
+        if (this.data.variableExpenses && typeof this.data.variableExpenses === 'object') {
+            Object.values(this.data.variableExpenses).forEach(day => {
+                if (Array.isArray(day)) {
+                    day.forEach(exp => {
+                        const cat = exp.category || 'Altro';
+                        categoryTotals[cat] = (categoryTotals[cat] || 0) + (exp.amount || 0);
+                    });
+                }
+            });
+        }
 
-    if (Object.keys(categoryTotals).length === 0) {
-        document.getElementById('aiWidget').style.display = 'none';
-        return;
-    }
+        if (Object.keys(categoryTotals).length === 0) {
+            document.getElementById('aiWidget').style.display = 'none';
+            return;
+        }
 
-    const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
-    const topCatName = topCategory[0];
+        const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+        const topCatName = topCategory[0];
 
-    if (topCategory[1] > 100) {
-        const reduction = Math.round(topCategory[1] * 0.1);
-        suggestions.push({
-            message: this.t('aiSuggestionReduce', {
-                amount: this.formatCurrency(topCategory[1]),
-                category: topCatName,
-                reduction: this.formatCurrency(reduction)
-            }),
-            action: this.t('aiActionSetGoal'),
-            actionType: 'reduce',
-            category: topCategory[0],
-            amount: reduction
-        });
-    }
+        if (topCategory[1] > 100) {
+            const reduction = Math.round(topCategory[1] * 0.1);
+            suggestions.push({
+                message: language === 'it'
+                    ? `💡 Hai speso ${this.formatCurrency(topCategory[1])} in ${topCatName}. Riducendo del 10% (${this.formatCurrency(reduction)}), potresti destinare quella cifra al risparmio.`
+                    : `💡 You spent ${this.formatCurrency(topCategory[1])} on ${topCatName}. By reducing it by 10% (${this.formatCurrency(reduction)}), you could add that to your savings.`,
+                action: language === 'it' ? 'Imposta obiettivo' : 'Set goal',
+                actionType: 'reduce',
+                category: topCategory[0],
+                amount: reduction
+            });
+        }
 
-    if (categoryTotals.Trasporti && categoryTotals.Trasporti > 50) {
-        const potentialSave = Math.round(categoryTotals.Trasporti * 0.2);
-        suggestions.push({
-            message: this.t('aiSuggestionTransport', {
-                amount: this.formatCurrency(categoryTotals.Trasporti),
-                potential: this.formatCurrency(potentialSave)
-            }),
-            action: this.t('aiActionLearnHow'),
-            actionType: 'transport',
-            amount: potentialSave
-        });
-    }
+        if (categoryTotals.Trasporti && categoryTotals.Trasporti > 50) {
+            const potentialSave = Math.round(categoryTotals.Trasporti * 0.2);
+            suggestions.push({
+                message: language === 'it'
+                    ? `🚗 Hai speso ${this.formatCurrency(categoryTotals.Trasporti)} in trasporti. Usando più mezzi pubblici, potresti risparmiare circa ${this.formatCurrency(potentialSave)} al mese.`
+                    : `🚗 You spent ${this.formatCurrency(categoryTotals.Trasporti)} on transport. Using public transport more could save you about ${this.formatCurrency(potentialSave)} per month.`,
+                action: language === 'it' ? 'Scopri come' : 'Learn how',
+                actionType: 'transport',
+                amount: potentialSave
+            });
+        }
 
-    if (categoryTotals.Svago && categoryTotals.Svago > 80) {
-        const potentialSave = Math.round(categoryTotals.Svago * 0.15);
-        suggestions.push({
-            message: this.t('aiSuggestionLeisure', {
-                amount: this.formatCurrency(categoryTotals.Svago),
-                potential: this.formatCurrency(potentialSave)
-            }),
-            action: this.t('aiActionPlan'),
-            actionType: 'leisure',
-            amount: potentialSave
-        });
-    }
+        if (categoryTotals.Svago && categoryTotals.Svago > 80) {
+            const potentialSave = Math.round(categoryTotals.Svago * 0.15);
+            suggestions.push({
+                message: language === 'it'
+                    ? `🎮 Hai speso ${this.formatCurrency(categoryTotals.Svago)} in svago. Limitando le uscite a 2 a settimana, potresti risparmiare ${this.formatCurrency(potentialSave)}.`
+                    : `🎮 You spent ${this.formatCurrency(categoryTotals.Svago)} on leisure. Limiting to 2 outings per week could save you ${this.formatCurrency(potentialSave)}.`,
+                action: language === 'it' ? 'Pianifica' : 'Plan',
+                actionType: 'leisure',
+                amount: potentialSave
+            });
+        }
 
-    if (suggestions.length > 0) {
-        const randomIndex = Math.floor(Math.random() * suggestions.length);
-        this.showAiSuggestion(suggestions[randomIndex]);
-    } else {
-        document.getElementById('aiWidget').style.display = 'none';
+        if (suggestions.length > 0) {
+            const randomIndex = Math.floor(Math.random() * suggestions.length);
+            this.showAiSuggestion(suggestions[randomIndex]);
+        } else {
+            document.getElementById('aiWidget').style.display = 'none';
+        }
     }
-}
 
     showAiSuggestion(suggestion) {
         const widget = document.getElementById('aiWidget');
@@ -6629,21 +6342,6 @@ function initApp() {
         window.appInitialized = true;
         // Rende disponibile anche 'app' per comodità
         window.app = window.BudgetWiseApp;
-        // ✅ Merge Premium (Report/PDF) translations once they are defined (same file, later).
-        (function ensurePremiumTranslations(){
-            let tries = 0;
-            const tick = () => {
-                tries++;
-                try {
-                    if (window.app && window.app.mergeTranslations && window.app.getPremiumModuleTranslations) {
-                        window.app.mergeTranslations(window.app.getPremiumModuleTranslations());
-                        return;
-                    }
-                } catch (_) {}
-                if (tries < 50) setTimeout(tick, 100);
-            };
-            setTimeout(tick, 0);
-        })();
         console.log('✅ BudgetWise inizializzato correttamente');
         console.log('👉 Nella console puoi usare: window.app o window.BudgetWiseApp');
     } catch (error) {
@@ -6676,169 +6374,158 @@ function setupImportHandlers() {
     const excelHeaderSelect = document.getElementById('excelHeaderRow');
     const advancedToggle = document.getElementById('importAdvancedToggle');
     const advancedWrap = document.getElementById('importAdvanced');
-    
+
     if (!btn || !fileInput || !window.app || typeof window.app.t !== 'function') {
         console.error('Elementi import non trovati');
         return;
     }
 
-    // Variabile per tenere traccia del file Excel in attesa
+    if (fileInput.dataset.bound === '1' && btn.dataset.bound === '1') {
+        return;
+    }
+
     window._pendingExcelFile = null;
-window._pendingImportFile = null;   // ✅ tiene traccia del file scelto (CSV o Excel)
-window._pendingImportName = '';     // (opzionale) per debug/UI
-            // Toggle opzioni avanzate (default: nascoste)
-    if (advancedToggle && advancedWrap) {
-        // Rimuovi eventuali listener precedenti
-        advancedToggle.replaceWith(advancedToggle.cloneNode(true));
-        const newAdvancedToggle = document.getElementById('importAdvancedToggle');
-        
-        // Imposta il testo iniziale in base alla lingua corrente
-        newAdvancedToggle.textContent = window.app ? window.app.t('advancedOptions') : '⚙️ Opzioni avanzate';
-        
-        newAdvancedToggle.addEventListener('click', () => {
+    window._pendingImportFile = null;
+    window._pendingImportName = '';
+
+    if (advancedToggle && advancedWrap && advancedToggle.dataset.bound !== '1') {
+        advancedToggle.dataset.bound = '1';
+        advancedToggle.textContent = window.app ? window.app.t('advancedOptions') : '⚙️ Opzioni avanzate';
+
+        advancedToggle.addEventListener('click', () => {
             const isOpen = advancedWrap.style.display !== 'none';
             advancedWrap.style.display = isOpen ? 'none' : 'block';
-            // Usa la traduzione corretta in base allo stato
-            newAdvancedToggle.textContent = isOpen 
+            advancedToggle.textContent = isOpen
                 ? (window.app ? window.app.t('advancedOptions') : '⚙️ Opzioni avanzate')
                 : (window.app ? window.app.t('hideOptions') : '✕ Nascondi opzioni');
         });
     }
-    
-    // Gestione cambio file
-    fileInput.replaceWith(fileInput.cloneNode(true));
-    const newFileInput = document.getElementById('csvFile');
-    
-    newFileInput.addEventListener('change', async function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        // ✅ FIX: salva sempre il file scelto (CSV o Excel), così non “sparisce”
-window._pendingImportFile = file;
-window._pendingImportName = file.name || '';
-        fileNameSpan.textContent = file.name;
-        
-        const fileExt = file.name.split('.').pop().toLowerCase();
-        const isExcel = ['xls', 'xlsx'].includes(fileExt);
-        
-        if (isExcel) {
+
+    if (fileInput.dataset.bound !== '1') {
+        fileInput.dataset.bound = '1';
+
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files && e.target.files[0];
+            if (!file) {
+                fileNameSpan.textContent = window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato';
+                window._pendingExcelFile = null;
+                window._pendingImportFile = null;
+                window._pendingImportName = '';
+                if (sheetSelect) {
+                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
+                    sheetSelect.disabled = true;
+                }
+                return;
+            }
+
+            window._pendingImportFile = file;
+            window._pendingImportName = file.name || '';
+            fileNameSpan.textContent = file.name;
+
+            const fileExt = file.name.split('.').pop().toLowerCase();
+            const isExcel = ['xls', 'xlsx'].includes(fileExt);
+
+            if (!isExcel) {
+                window._pendingExcelFile = null;
+                if (sheetSelect) {
+                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
+                    sheetSelect.disabled = true;
+                }
+                return;
+            }
+
             if (sheetSelect) {
                 sheetSelect.innerHTML = '<option value="">Caricamento...</option>';
                 sheetSelect.disabled = true;
             }
-            
-            try {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const data = new Uint8Array(e.target.result);
-                        const workbook = XLSX.read(data, { type: 'array' });
-                        
-                        if (sheetSelect) {
-                            sheetSelect.innerHTML = workbook.SheetNames.map((name, index) => 
-                                `<option value="${index}">${index+1}. ${name}</option>`
-                            ).join('');
-                            sheetSelect.disabled = false;
-                            sheetSelect.value = '0';
-                        }
-                        
-                        window._pendingExcelFile = file;
-                        
-                    } catch (err) {
-                        alert('❌ Errore nella lettura del file Excel: ' + err.message);
+
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = new Uint8Array(ev.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+
+                    if (sheetSelect) {
+                        sheetSelect.innerHTML = workbook.SheetNames.map((name, index) =>
+                            `<option value="${index}">${index + 1}. ${name}</option>`
+                        ).join('');
+                        sheetSelect.disabled = false;
+                        sheetSelect.value = '0';
                     }
-                };
-                reader.readAsArrayBuffer(file);
-                
-            } catch (error) {
-                alert('❌ Errore nella lettura del file Excel: ' + error.message);
-            }
-        } else {
-            if (sheetSelect) {
-                sheetSelect.innerHTML = '<option value="">Carica un file Excel</option>';
-                sheetSelect.disabled = true;
-            }
-            window._pendingExcelFile = null;
-        }
-    });
 
-    // Gestione click pulsante Importa
-    const newBtn = btn.cloneNode(true);
-    btn.parentNode.replaceChild(newBtn, btn);
-    
-    newBtn.addEventListener('click', async function() {
-    const file = newFileInput.files[0];
-
-    // ✅ FIX: se l’input perde il file, usiamo quello salvato al change
-    const pendingFile = window._pendingExcelFile || window._pendingImportFile;
-
-    if (!file && !pendingFile) {
-        newFileInput.click();
-        return;
+                    window._pendingExcelFile = file;
+                } catch (err) {
+                    console.error(err);
+                    alert('❌ Errore nella lettura del file Excel: ' + err.message);
+                    window._pendingExcelFile = null;
+                }
+            };
+            reader.onerror = () => {
+                alert('❌ Errore nella lettura del file Excel');
+                window._pendingExcelFile = null;
+            };
+            reader.readAsArrayBuffer(file);
+        });
     }
 
-    const fileToImport = pendingFile || file;
-        const fileExt = fileToImport.name.split('.').pop().toLowerCase();
-        const isExcel = ['xls', 'xlsx'].includes(fileExt);
-        
-        try {
-            if (isExcel) {
-                const sheetIndex = (sheetSelect && !sheetSelect.disabled && sheetSelect.value !== '')
-                    ? parseInt(sheetSelect.value)
-                    : 0;
-                const headerRow = excelHeaderSelect
-                    ? parseInt(excelHeaderSelect.value || '-1')
-                    : -1;
-                
-                newBtn.textContent = '⏳ Importazione...';
-                newBtn.disabled = true;
-                
-                await window.app.parseExcel(fileToImport, sheetIndex, headerRow);
-                
-                window._pendingExcelFile = null;
+    if (btn.dataset.bound !== '1') {
+        btn.dataset.bound = '1';
 
-// ✅ FIX: pulisci anche il file “memorizzato” (CSV o Excel)
-window._pendingImportFile = null;
-window._pendingImportName = '';
+        btn.addEventListener('click', async function () {
+            const selectedFile = (fileInput.files && fileInput.files[0]) || window._pendingImportFile;
 
-newFileInput.value = '';
-fileNameSpan.textContent = 'Nessun file selezionato';
-if (sheetSelect) {
-    sheetSelect.innerHTML = '<option value="">Carica un file Excel</option>';
-    sheetSelect.disabled = true;
-}
-                
-            } else {
-    const delimiter = document.getElementById('csvSeparator').value;
-    const dateFormat = document.getElementById('csvDelimiter').value;
-    const skipRows = parseInt(skipRowsInput?.value || '0');
-    const headerRow = parseInt(headerRowInput?.value || '1');
-    
-    newBtn.textContent = '⏳ Importazione...';
-    newBtn.disabled = true;
-    
-    await window.app.parseCSV(fileToImport, delimiter, dateFormat, skipRows, headerRow);
-    
-    newFileInput.value = '';
-    fileNameSpan.textContent = 'Nessun file selezionato';
-
-    // ✅ FIX: pulisci anche il file memorizzato (evita “file fantasma” al prossimo import)
-    window._pendingImportFile = null;
-    window._pendingImportName = '';
-}
-            
-        } catch (error) {
-            alert('❌ Errore durante l\'import: ' + (error?.message || String(error)));
-            console.error(error);
-        } finally {
-            try {
-                newBtn.innerHTML = window.app?.t ? window.app.t('csvImportBtn') : '📥 Importa CSV / Excel';
-            } catch {
-                newBtn.textContent = '📥 Importa CSV / Excel';
+            if (!selectedFile) {
+                fileInput.click();
+                return;
             }
-            newBtn.disabled = false;
-        }
-    });
+
+            const fileExt = selectedFile.name.split('.').pop().toLowerCase();
+            const isExcel = ['xls', 'xlsx'].includes(fileExt);
+
+            try {
+                btn.disabled = true;
+                btn.textContent = '⏳ Importazione...';
+
+                if (isExcel) {
+                    const sheetIndex = (sheetSelect && !sheetSelect.disabled && sheetSelect.value !== '')
+                        ? parseInt(sheetSelect.value, 10)
+                        : 0;
+
+                    const headerRow = excelHeaderSelect
+                        ? parseInt(excelHeaderSelect.value || '-1', 10)
+                        : -1;
+
+                    await window.app.parseExcel(selectedFile, sheetIndex, headerRow);
+                } else {
+                    const delimiter = document.getElementById('csvSeparator')?.value || ';';
+                    const dateFormat = document.getElementById('csvDelimiter')?.value || 'dd/mm/yyyy';
+                    const skipRows = parseInt(skipRowsInput?.value || '0', 10);
+                    const headerRow = parseInt(headerRowInput?.value || '1', 10);
+
+                    await window.app.parseCSV(selectedFile, delimiter, dateFormat, skipRows, headerRow);
+                }
+
+                fileInput.value = '';
+                fileNameSpan.textContent = window.app?.t ? window.app.t('csvNoFile') : 'Nessun file selezionato';
+                window._pendingExcelFile = null;
+                window._pendingImportFile = null;
+                window._pendingImportName = '';
+
+                if (sheetSelect) {
+                    sheetSelect.innerHTML = `<option value="">${window.app?.t ? window.app.t('excelSheetPlaceholder') : 'Carica un file Excel'}</option>`;
+                    sheetSelect.disabled = true;
+                }
+            } catch (error) {
+                console.error(error);
+                alert('❌ Errore durante l\'import: ' + (error?.message || String(error)));
+            } finally {
+                btn.innerHTML = window.app?.t ? window.app.t('csvImportBtn') : '📥 Importa CSV / Excel';
+                btn.disabled = false;
+            }
+        });
+    }
 }
+
 
 
 BudgetWise.prototype.clamp100 = function(x) {
